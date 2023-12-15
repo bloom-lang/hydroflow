@@ -1,0 +1,44 @@
+// module args: (ΔLeft, ΔRight)
+// each input is of the form ((k, tuple), multiplicity)
+dLeft = mod[0] -> tee();
+dLeft_keyed = dLeft 
+    -> map(|((k, tup), n)| (k, (tup, n))) // format tuples for joining
+    -> tee(); 
+Left_keyed = dLeft
+    // Integrate
+    -> reduce_keyed::<'static, (usize, usize), i32>(|accum: &mut i32, m: i32| *accum += m)
+    -> defer_tick()
+    -> map(|((k, tup), n)| (k, (tup, n))); // format tuples for joining
+
+dRight = mod[1] -> tee();
+dRight_keyed = dRight 
+    -> map(|((k, tup), n)| (k, (tup, n))) // format tuples for joining
+    -> tee(); 
+Right_keyed = dRight
+    // Integrate
+    -> reduce_keyed::<'static, (usize, usize), i32>(|accum: &mut i32, m: i32| *accum += m)
+    -> defer_tick()
+    -> map(|((k, tup), n)| (k, (tup, n))); // format tuples for joining
+
+// ΔLeft × ΔRight
+dLeft_keyed -> [0]diffjoin;
+dRight_keyed -> [1]diffjoin;
+diffjoin = join::<'tick>() // tick here because static upstream
+    -> delta_out;
+// Left × ΔRight
+Left_keyed -> [0]t_join;
+dRight_keyed -> [1]t_join;
+t_join = join::<'tick>()
+    -> delta_out;
+// ΔLeft × Right
+dLeft_keyed -> [0]r_join;
+Right_keyed -> [1]r_join;
+r_join = join::<'tick>()
+    -> delta_out;
+
+// ΔLeft × ΔRight + ΔLeft × Right + Left × ΔRight ; new tuples from ΔLeft, ΔRight
+delta_out = union()
+    -> map(|(id, ((x, n), (y, m)))| ((id, x, y), n * m))
+    -> reduce_keyed::<'tick, (usize, usize, usize), i32>(|accum: &mut i32, m: i32| *accum += m)
+    -> map(|((id, x, y), m)| (id, x, y, m))
+    -> mod;

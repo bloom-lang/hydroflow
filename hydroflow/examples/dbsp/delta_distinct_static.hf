@@ -1,0 +1,38 @@
+input = mod -> tee();
+
+// I -> z^-1 ; integrate then delay 1 tick
+last_cumu = input
+    -> map(|(id, x, y, m)| ((id, x, y), m))
+    -> reduce_keyed::<'static, (usize, usize, usize), i32>(|accum: &mut i32, m: i32| *accum += m)
+    -> defer_tick();
+current = input
+    -> map(|(id, x, y, m)| ((id, x, y), m))
+    -> reduce_keyed::<'tick, (usize, usize, usize), i32>(|accum: &mut i32, m: i32| *accum += m);
+
+// DBSP's H operator: emit set-oriented deltas based on multiset multiplicities.
+// Basically form a left outer join of current and last tick, then for each key return: 
+// - +1 if the tuple is currently positive but was non-positive multiplicity ("insert")
+// - -1 if the tuple is currently non-positive but was positive multiplicity ("delete")
+// - no delta emitted otherwise
+current
+    -> inspect(|t| println!("new at tick {}: {:?}", context.current_tick(), t))
+    -> [0]loj;
+last_cumu
+    -> inspect(|t| println!("cumulative at tick {}: {:?}", context.current_tick() - 1, t))
+    -> [1]loj;
+loj = import!("left_outer_join.hf");
+
+loj
+    -> map(|((id, x, y), (current, last))| {
+        let last = last.unwrap_or(0);
+        let m = current + last;
+        if last > 0 && m <= 0 {
+            ((id, x, y), -1)
+        } else if last <= 0 && m > 0 {
+            ((id, x, y), 1)
+        } else {
+            ((id, x, y), 0)
+        }
+    })            
+    -> filter(|(_, m) | m != &0)
+    -> mod;
