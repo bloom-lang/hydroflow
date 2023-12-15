@@ -11,14 +11,17 @@ pub fn main() {
 
         source_stream(T_recv)
             -> filter(|((_, a, _), _)| a > &2)
-            -> map(|((id, _, x), n)| ((id, (x)), n)) // ((key, tup), mult)
+            -> map(|((id, _, x), n)| (id, (x,), n)) // ((key, tup), mult)
+            // -> for_each(|t| println!("T going into delta_join: {:?}", t));
             -> [0]delta_join;
         source_stream(R_recv)
             -> filter(|((_, s, _), _)| s > &5)
-            -> map(|((id, _, y), m)| ((id, (y)), m)) // ((key, tup), mult)
+            -> map(|((id, _, y), m)| (id, (y,), m)) // ((key, tup), mult)
+            // -> for_each(|t| println!("R going into delta_join: {:?}", t));
             -> [1]delta_join;
         delta_join
             -> delta_distinct
+            -> map(|(k, ((x,), (y,)), m)| (k, x, y, m))
             -> for_each(|t| println!("==> Output delta: {:?}", t));
     };
     df.run_available();

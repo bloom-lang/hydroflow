@@ -1,13 +1,17 @@
+// incremental distinct for set semantics, as in DBSP
+// outputs deltas indicating when multiplicity goes positive (insert) 
+// or non-positive (delete).
+// input and output of type (key, tuple, multiplicity)
 input = mod -> tee();
 
 // I -> z^-1 ; integrate then delay 1 tick
 last_cumu = input
-    -> map(|(id, x, y, m)| ((id, x, y), m))
-    -> reduce_keyed::<'static, (usize, usize, usize), i32>(|accum: &mut i32, m: i32| *accum += m)
+    -> map(|(id, tup, m)| ((id, tup), m))
+    -> reduce_keyed::<'static, (usize, _), i32>(|accum: &mut i32, m: i32| *accum += m)
     -> defer_tick();
 current = input
-    -> map(|(id, x, y, m)| ((id, x, y), m))
-    -> reduce_keyed::<'tick, (usize, usize, usize), i32>(|accum: &mut i32, m: i32| *accum += m);
+    -> map(|(id, tup, m)| ((id, tup), m))
+    -> reduce_keyed::<'tick, (usize, _), i32>(|accum: &mut i32, m: i32| *accum += m);
 
 // DBSP's H operator: emit set-oriented deltas based on multiset multiplicities.
 // Basically form a left outer join of current and last tick, then for each key return: 
@@ -15,24 +19,25 @@ current = input
 // - -1 if the tuple is currently non-positive but was positive multiplicity ("delete")
 // - no delta emitted otherwise
 current
-    -> inspect(|t| println!("new at tick {}: {:?}", context.current_tick(), t))
+    -> inspect(|((id, tup), mult)| println!("new at tick {}: ({}, {:?}, {})", context.current_tick(), id, tup, mult))
     -> [0]loj;
 last_cumu
-    -> inspect(|t| println!("cumulative at tick {}: {:?}", context.current_tick() - 1, t))
+    -> inspect(|((id, tup), mult)| println!("new at tick {}: ({}, {:?}, {})", context.current_tick(), id, tup, mult))
     -> [1]loj;
 loj = import!("left_outer_join.hf");
 
 loj
-    -> map(|((id, x, y), (current, last))| {
+    -> map(|((id, tup), (current, last))| {
         let last = last.unwrap_or(0);
         let m = current + last;
         if last > 0 && m <= 0 {
-            ((id, x, y), -1)
+            ((id, tup), -1)
         } else if last <= 0 && m > 0 {
-            ((id, x, y), 1)
+            ((id, tup), 1)
         } else {
-            ((id, x, y), 0)
+            ((id, tup), 0)
         }
     })            
     -> filter(|(_, m) | m != &0)
+    -> map(|((id, tup), mult)| (id, tup, mult))
     -> mod;
